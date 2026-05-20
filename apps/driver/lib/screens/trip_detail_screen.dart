@@ -1,14 +1,26 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' as ll;
+
+import '../services/geocode_service.dart';
+import '../services/route_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/common_widgets.dart';
 
-class TripDetailScreen extends StatelessWidget {
+class TripDetailScreen extends StatefulWidget {
   final Trip trip;
 
   const TripDetailScreen({super.key, required this.trip});
+
+  @override
+  State<TripDetailScreen> createState() => _TripDetailScreenState();
+}
+
+class _TripDetailScreenState extends State<TripDetailScreen> {
+  final MapController _mapController = MapController();
 
   void _showBlockchainBottomSheet(BuildContext context) {
     showModalBottomSheet(
@@ -63,7 +75,7 @@ class TripDetailScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      trip.route,
+                      widget.trip.route,
                       style: GoogleFonts.dmSans(
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
@@ -80,7 +92,7 @@ class TripDetailScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     SelectableText(
-                      trip.hash,
+                      widget.trip.hash,
                       style: GoogleFonts.robotoMono(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
@@ -120,14 +132,14 @@ class TripDetailScreen extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: Text(
-                    'Close',
-                    style: GoogleFonts.dmSans(
-                      color: TruxifyColors.primaryText,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
+                    child: Text(
+                      'Close',
+                      style: GoogleFonts.dmSans(
+                        color: TruxifyColors.primaryText,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
                     ),
-                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -166,6 +178,7 @@ class TripDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final trip = widget.trip;
     final breakdown = trip.paymentBreakdown;
 
     // Extract start and end cities
@@ -329,7 +342,7 @@ class TripDetailScreen extends StatelessWidget {
               ),
             ),
 
-            // 2. Map Section
+            // 2. Map Section — render OSM map with route polyline when available
             Container(
               margin: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -341,117 +354,107 @@ class TripDetailScreen extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
                 child: Column(
                   children: [
-                    Container(
+                    SizedBox(
                       height: 180,
-                      color: const Color(0xFFF0E8E8),
-                      child: Stack(
-                        children: [
-                          // Grid pattern or subtle details could be added here, let's make a styled layout
-                          // Route line (dashed)
-                          Positioned(
-                            left: 50,
-                            right: 50,
-                            top: 80,
-                            height: 2,
-                            child: Row(
-                              children: List.generate(
-                                20,
-                                (index) => Expanded(
-                                  child: Container(
-                                    color: index % 2 == 0
-                                        ? TruxifyColors.accent
-                                        : Colors.transparent,
+                      child: FutureBuilder<_RouteResult?>(
+                        future: _loadRouteForTrip(trip.route),
+                        builder: (context, snap) {
+                          if (snap.connectionState != ConnectionState.done) {
+                            return Container(
+                              color: const Color(0xFFF0E8E8),
+                              child: const Center(child: CircularProgressIndicator()),
+                            );
+                          }
+
+                          final result = snap.data;
+                          if (result == null || (result.start == null && result.end == null)) {
+                            return Container(
+                              color: const Color(0xFFF0E8E8),
+                              child: Stack(
+                                children: [
+                                  Positioned(
+                                    left: 50,
+                                    right: 50,
+                                    top: 80,
                                     height: 2,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          // Start Circle (S)
-                          Positioned(
-                            left: 30,
-                            top: 64,
-                            child: Column(
-                              children: [
-                                Container(
-                                  width: 32,
-                                  height: 32,
-                                  decoration: const BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: TruxifyColors.accent,
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      startLetter,
-                                      style: GoogleFonts.dmSans(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
+                                    child: Row(
+                                      children: List.generate(
+                                        20,
+                                        (index) => Expanded(
+                                          child: Container(
+                                            color: index % 2 == 0 ? TruxifyColors.accent : Colors.transparent,
+                                            height: 2,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  startCity,
-                                  style: GoogleFonts.dmSans(
-                                    fontSize: 10,
-                                    color: TruxifyColors.hintText,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          // End Circle (J)
-                          Positioned(
-                            right: 30,
-                            top: 64,
-                            child: Column(
-                              children: [
-                                Container(
-                                  width: 32,
-                                  height: 32,
-                                  decoration: const BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: TruxifyColors.success,
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      endLetter,
-                                      style: GoogleFonts.dmSans(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                  const Positioned(
+                                    left: 0,
+                                    right: 0,
+                                    top: 62,
+                                    child: Center(
+                                      child: Text('🚛', style: TextStyle(fontSize: 20)),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  endCity,
-                                  style: GoogleFonts.dmSans(
-                                    fontSize: 10,
-                                    color: TruxifyColors.hintText,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          // Truck indicator in the middle
-                          const Positioned(
-                            left: 0,
-                            right: 0,
-                            top: 62,
-                            child: Center(
-                              child: Text(
-                                '🚛',
-                                style: TextStyle(fontSize: 20),
+                                ],
                               ),
+                            );
+                          }
+
+                          final routePoints = result.routePoints;
+                          final center = _computeCenter(routePoints, result.start, result.end);
+                          final zoom = _computeZoom(routePoints, result.start, result.end);
+
+                          return FlutterMap(
+                            mapController: _mapController,
+                            options: MapOptions(
+                              initialCenter: center,
+                              initialZoom: zoom,
+                              interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
                             ),
-                          ),
-                        ],
+                            children: [
+                              TileLayer(
+                                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                userAgentPackageName: 'com.truxify.driver',
+                              ),
+                              if (routePoints.isNotEmpty)
+                                PolylineLayer(
+                                  polylines: [
+                                    Polyline(
+                                      points: routePoints,
+                                      strokeWidth: 4.0,
+                                      color: TruxifyColors.accent,
+                                      borderStrokeWidth: 1.5,
+                                      borderColor: Colors.white.withOpacity(0.8),
+                                    ),
+                                  ],
+                                ),
+                              MarkerLayer(
+                                markers: [
+                                  if (result.start != null)
+                                    Marker(
+                                      point: result.start!,
+                                      width: 20,
+                                      height: 20,
+                                      child: Container(
+                                        decoration: const BoxDecoration(shape: BoxShape.circle, color: TruxifyColors.accent),
+                                      ),
+                                    ),
+                                  if (result.end != null)
+                                    Marker(
+                                      point: result.end!,
+                                      width: 20,
+                                      height: 20,
+                                      child: Container(
+                                        decoration: const BoxDecoration(shape: BoxShape.circle, color: TruxifyColors.success),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ),
                     // Map CTA Button
@@ -476,19 +479,11 @@ class TripDetailScreen extends StatelessWidget {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(
-                                Icons.map_outlined,
-                                color: Colors.white,
-                                size: 16,
-                              ),
+                              const Icon(Icons.map_outlined, color: Colors.white, size: 16),
                               const SizedBox(width: 8),
                               Text(
                                 'View Full Route on Google Maps',
-                                style: GoogleFonts.dmSans(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13,
-                                ),
+                                style: GoogleFonts.dmSans(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
                               ),
                             ],
                           ),
@@ -727,4 +722,74 @@ class TripDetailScreen extends StatelessWidget {
       ),
     );
   }
+
+  Future<_RouteResult?> _loadRouteForTrip(String routeLabel) async {
+    try {
+      final parts = routeLabel.split('→');
+      final startLabel = parts.isNotEmpty ? parts[0].trim() : '';
+      final endLabel = parts.length > 1 ? parts[1].trim() : '';
+
+      final start = startLabel.isNotEmpty ? await GeocodeService.resolvePlace(startLabel) : null;
+      final end = endLabel.isNotEmpty ? await GeocodeService.resolvePlace(endLabel) : null;
+
+      List<ll.LatLng> routePoints = <ll.LatLng>[];
+      if (start != null && end != null) {
+        // RouteService expects lat,long order via LatLng
+        routePoints = await RouteService.fetchRouteGeoJson([ll.LatLng(start.latitude, start.longitude), ll.LatLng(end.latitude, end.longitude)]);
+      }
+
+      return _RouteResult(start: start, end: end, routePoints: routePoints);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  ll.LatLng _computeCenter(List<ll.LatLng> routePoints, ll.LatLng? start, ll.LatLng? end) {
+    if (routePoints.isNotEmpty) {
+      final lats = routePoints.map((p) => p.latitude).toList(growable: false);
+      final lngs = routePoints.map((p) => p.longitude).toList(growable: false);
+      final minLat = lats.reduce(min);
+      final maxLat = lats.reduce(max);
+      final minLng = lngs.reduce(min);
+      final maxLng = lngs.reduce(max);
+      return ll.LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2);
+    }
+
+    if (start != null && end != null) {
+      return ll.LatLng((start.latitude + end.latitude) / 2, (start.longitude + end.longitude) / 2);
+    }
+
+    return start ?? end ?? ll.LatLng(22.9734, 78.6569);
+  }
+
+  double _computeZoom(List<ll.LatLng> routePoints, ll.LatLng? start, ll.LatLng? end) {
+    double spanLat, spanLng;
+    if (routePoints.isNotEmpty) {
+      final lats = routePoints.map((p) => p.latitude).toList(growable: false);
+      final lngs = routePoints.map((p) => p.longitude).toList(growable: false);
+      spanLat = lats.reduce(max) - lats.reduce(min);
+      spanLng = lngs.reduce(max) - lngs.reduce(min);
+    } else if (start != null && end != null) {
+      spanLat = (start.latitude - end.latitude).abs();
+      spanLng = (start.longitude - end.longitude).abs();
+    } else {
+      return 6.0;
+    }
+
+    final span = max(spanLat, spanLng);
+    if (span < 0.05) return 13.5;
+    if (span < 0.15) return 12.0;
+    if (span < 0.35) return 10.4;
+    if (span < 0.9) return 8.8;
+    if (span < 2.5) return 7.4;
+    return 6.0;
+  }
 }
+
+class _RouteResult {
+  const _RouteResult({this.start, this.end, required this.routePoints});
+  final ll.LatLng? start;
+  final ll.LatLng? end;
+  final List<ll.LatLng> routePoints;
+}
+

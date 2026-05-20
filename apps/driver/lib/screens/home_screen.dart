@@ -30,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   final MapController _mapController = MapController();
+  double _mapZoom = 5.7;
 
   Future<List<ll.LatLng>>? _routeFuture;
   DestinationPickResult? _destination;
@@ -115,7 +116,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _centerMapOnCurrentLocation() {
-    _mapController.move(_currentLocation, _mapController.camera.zoom);
+    _mapController.move(_currentLocation, _mapZoom);
   }
 
   void _toggleOnlineState() {
@@ -356,7 +357,7 @@ class _HomeScreenState extends State<HomeScreen> {
         mapController: _mapController,
         options: MapOptions(
           initialCenter: _currentLocation,
-          initialZoom: 5.7,
+          initialZoom: _mapZoom,
           interactionOptions: const InteractionOptions(
             flags: InteractiveFlag.all,
           ),

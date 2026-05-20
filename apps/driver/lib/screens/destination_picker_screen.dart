@@ -49,6 +49,7 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
 
   final MapController _mapController = MapController();
   final TextEditingController _searchController = TextEditingController();
+  double _mapZoom = 5.2;
 
   Timer? _debounce;
   List<_SearchSuggestion> _suggestions = const <_SearchSuggestion>[];
@@ -300,15 +301,15 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
-                child: FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: center,
-                    initialZoom: _selectedPoint == null ? 5.2 : 12.5,
-                    minZoom: 4,
-                    maxZoom: 18,
-                    onTap: (_, point) => _setLocation(point),
-                  ),
+                 child: FlutterMap(
+                   mapController: _mapController,
+                   options: MapOptions(
+                     initialCenter: center,
+                     initialZoom: _selectedPoint == null ? _mapZoom : 12.5,
+                     minZoom: 4,
+                     maxZoom: 18,
+                     onTap: (_, point) => _setLocation(point),
+                   ),
                   children: [
                     TileLayer(
                       urlTemplate:

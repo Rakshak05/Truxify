@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' as ll;
 import '../core/app_routes.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../data/mock_data.dart';
 import '../widgets/common_widgets.dart';
+import '../services/geocode_service.dart';
 
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
@@ -458,6 +461,80 @@ class _TripsScreenState extends State<TripsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Small route thumbnail (OSM)
+                      SizedBox(
+                        height: 86,
+                        child: FutureBuilder<List<ll.LatLng?>>(
+                          future: _resolveRoutePoints(trip.route),
+                          builder: (context, snap) {
+                            if (snap.connectionState != ConnectionState.done || snap.data == null) {
+                              return Container(
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF0E8E8),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Center(child: Icon(Icons.map_outlined, color: Colors.grey)),
+                              );
+                            }
+
+                            final points = snap.data!;
+                            final start = points.isNotEmpty ? points[0] : null;
+                            final end = points.length > 1 ? points[1] : null;
+
+                            final center = (start ?? end) ?? ll.LatLng(22.9734, 78.6569);
+                            final zoom = 6.0;
+
+                            return ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: FlutterMap(
+                                options: MapOptions(
+                                  initialCenter: center,
+                                  initialZoom: zoom,
+                                  interactionOptions: const InteractionOptions(
+                                    flags: InteractiveFlag.none,
+                                  ),
+                                ),
+                                children: [
+                                  TileLayer(
+                                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                    userAgentPackageName: 'com.truxify.driver',
+                                  ),
+                                  if (start != null || end != null)
+                                    MarkerLayer(
+                                      markers: [
+                                        if (start != null)
+                                          Marker(
+                                            point: start,
+                                            width: 8,
+                                            height: 8,
+                                            child: Container(
+                                              decoration: const BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: TruxifyColors.accent,
+                                              ),
+                                            ),
+                                          ),
+                                        if (end != null)
+                                          Marker(
+                                            point: end,
+                                            width: 8,
+                                            height: 8,
+                                            child: Container(
+                                              decoration: const BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: TruxifyColors.success,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       // Top Row
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -562,5 +639,19 @@ class _TripsScreenState extends State<TripsScreen> {
         ),
       ),
     );
+  }
+
+  /// Resolve start and end coordinates for a route label like "Surat → Jaipur".
+  Future<List<ll.LatLng?>> _resolveRoutePoints(String routeLabel) async {
+    try {
+      final parts = routeLabel.split(RegExp(r'→|-|to'));
+      final start = parts.isNotEmpty ? parts[0].trim() : '';
+      final end = parts.length > 1 ? parts[1].trim() : '';
+
+      final results = await Future.wait([GeocodeService.resolvePlace(start), GeocodeService.resolvePlace(end)]);
+      return results;
+    } catch (_) {
+      return <ll.LatLng?>[null, null];
+    }
   }
 }
