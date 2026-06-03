@@ -35,6 +35,31 @@ class _OrdersScreenState extends State<OrdersScreen>
   List<ActiveOrderData> _activeOrders = [];
   List<HistoryOrderData> _historyOrders = [];
 
+  String _formatStatus(String status) {
+    switch (status) {
+      case 'driver_assigned':
+        return 'Driver Assigned';
+      case 'in_transit':
+        return 'In Transit';
+      case 'payment_released':
+        return 'Payment Released';
+      case 'completed':
+      case 'delivered':
+        return 'Delivered';
+      case 'cancelled':
+        return 'Cancelled';
+      case 'pending':
+        return 'Pending';
+      default:
+        return status
+            .split('_')
+            .map((word) => word.isEmpty
+                ? word
+                : '${word[0].toUpperCase()}${word.substring(1)}')
+            .join(' ');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -102,9 +127,10 @@ class _OrdersScreenState extends State<OrdersScreen>
               orderId: order['order_display_id']?.toString() ?? '',
               route: '${order['pickup_address']} → ${order['drop_address']}',
               driver: order['driver_id']?.toString() ?? 'Not Assigned',
-              milestone: order['status']?.toString() ?? 'Pending',
+              milestone:
+                  _formatStatus(order['status']?.toString() ?? 'pending'),
               eta: order['eta']?.toString() ?? '',
-              status: order['status']?.toString() ?? '',
+              status: _formatStatus(order['status']?.toString() ?? 'pending'),
             );
           }).toList();
 
@@ -114,7 +140,7 @@ class _OrdersScreenState extends State<OrdersScreen>
               route: '${order['pickup_address']} → ${order['drop_address']}',
               date: order['pickup_date']?.toString() ?? '',
               amount: '₹${order['total_amount'] ?? 0}',
-              status: order['status']?.toString() ?? '',
+              status: _formatStatus(order['status']?.toString() ?? 'completed'),
               driver: order['driver_id']?.toString() ?? '',
               truckNumber: order['truck_id']?.toString() ?? '',
               timeline: const [],
@@ -260,37 +286,43 @@ class _OrdersScreenState extends State<OrdersScreen>
             child: TabBarView(
               controller: _tabController,
               children: [
-                ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                  itemCount: _filteredActiveOrders.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 14),
-                  itemBuilder: (context, index) {
-                    final order = _filteredActiveOrders[index];
-                    return ActiveOrderCard(
-                      order: order,
-                      onTap: () => Navigator.of(context).push(
-                        AppPageRoute(
-                            builder: (_) =>
-                                LiveTrackingScreen(orderId: order.orderId)),
-                      ),
-                    );
-                  },
+                RefreshIndicator(
+                  onRefresh: _loadOrders,
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+                    itemCount: _filteredActiveOrders.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 14),
+                    itemBuilder: (context, index) {
+                      final order = _filteredActiveOrders[index];
+                      return ActiveOrderCard(
+                        order: order,
+                        onTap: () => Navigator.of(context).push(
+                          AppPageRoute(
+                              builder: (_) =>
+                                  LiveTrackingScreen(orderId: order.orderId)),
+                        ),
+                      );
+                    },
+                  ),
                 ),
-                ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                  itemCount: _filteredHistoryOrders.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 14),
-                  itemBuilder: (context, index) {
-                    final order = _filteredHistoryOrders[index];
-                    return HistoryOrderCard(
-                      order: order,
-                      onTap: () => Navigator.of(context).push(
-                        AppPageRoute(
-                            builder: (_) => OrderDetailScreen(order: order)),
-                      ),
-                    );
-                  },
-                ),
+                RefreshIndicator(
+                  onRefresh: _loadOrders,
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+                    itemCount: _filteredHistoryOrders.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 14),
+                    itemBuilder: (context, index) {
+                      final order = _filteredHistoryOrders[index];
+                      return HistoryOrderCard(
+                        order: order,
+                        onTap: () => Navigator.of(context).push(
+                          AppPageRoute(
+                              builder: (_) => OrderDetailScreen(order: order)),
+                        ),
+                      );
+                    },
+                  ),
+                )
               ],
             ),
           ),

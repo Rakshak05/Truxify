@@ -20,6 +20,10 @@ class BookingConfirmationScreen extends StatefulWidget {
 
 class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     with SingleTickerProviderStateMixin {
+  double get _pickupLat => 21.1702;
+  double get _pickupLng => 72.8311;
+  double get _dropLat => 26.9124;
+  double get _dropLng => 75.7873;
   final TextEditingController _upiController =
       TextEditingController(text: 'karthik@upi');
   bool _showSuccess = false;
@@ -54,12 +58,18 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         orderDisplayId: orderId,
         pickupAddress: widget.draft.pickup,
         dropAddress: widget.draft.drop,
+        pickupLat: widget.draft.pickupLat ?? _pickupLat,
+        pickupLng: widget.draft.pickupLng ?? _pickupLng,
+        dropLat: widget.draft.dropLat ?? _dropLat,
+        dropLng: widget.draft.dropLng ?? _dropLng,
+        pickupTime: widget.draft.dateLabel,
         goodsType: widget.draft.goodsType,
         weightTonnes: double.tryParse(widget.draft.weightTonnes) ?? 0,
         truckId: mockDefaultTruckNumber,
         driverId: widget.truck.driver,
         totalAmount: 7000,
       );
+
       _createdOrderId = orderId;
 
       setState(() => _showSuccess = true);

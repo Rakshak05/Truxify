@@ -1,13 +1,10 @@
-import 'dart:convert';
 import 'dart:async';
 import '../services/order_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
-import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/timeline_connector.dart';
@@ -29,7 +26,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   List<Map<String, dynamic>> _timeline = [];
   Map<String, dynamic>? _order;
   RealtimeChannel? _ordersChannel;
-  List<LatLng> _routePoints = const [_pickupPoint, _dropPoint];
+  List<LatLng> _routePoints = const [_fallbackPickupPoint, _fallbackDropPoint];
 
   @override
   void initState() {
@@ -40,9 +37,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         AnimationController(vsync: this, duration: const Duration(seconds: 9))
           ..repeat();
 
-    _loadRoute();
-    _loadTimeline();
     _loadOrder();
+    _loadTimeline();
     _subscribeToOrderUpdates();
   }
 
@@ -63,6 +59,21 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
       setState(() {
         _order = order;
+
+        final pickupLat = (order?['pickup_lat'] as num?)?.toDouble();
+        final pickupLng = (order?['pickup_lng'] as num?)?.toDouble();
+        final dropLat = (order?['drop_lat'] as num?)?.toDouble();
+        final dropLng = (order?['drop_lng'] as num?)?.toDouble();
+
+        if (pickupLat != null &&
+            pickupLng != null &&
+            dropLat != null &&
+            dropLng != null) {
+          _routePoints = [
+            LatLng(pickupLat, pickupLng),
+            LatLng(dropLat, dropLng),
+          ];
+        }
       });
     } catch (e) {
       debugPrint('Failed to load order: $e');
@@ -268,8 +279,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     );
   }
 
-  static const LatLng _pickupPoint = LatLng(21.1702, 72.8311);
-  static const LatLng _dropPoint = LatLng(26.9124, 75.7873);
+  static const LatLng _fallbackPickupPoint = LatLng(21.1702, 72.8311);
+  static const LatLng _fallbackDropPoint = LatLng(26.9124, 75.7873);
 
   Future<void> _loadTimeline() async {
     try {
@@ -299,77 +310,21 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
           ),
           callback: (payload) {
             debugPrint('Realtime order update: ${payload.newRecord}');
+            _loadOrder();
             _loadTimeline();
           },
         )
         .subscribe();
   }
 
-  Future<void> _loadRoute() async {
-    final uri = Uri.https(
-      'router.project-osrm.org',
-      '/route/v1/driving/${_pickupPoint.longitude},${_pickupPoint.latitude};${_dropPoint.longitude},${_dropPoint.latitude}',
-      const {
-        'overview': 'full',
-        'geometries': 'geojson',
-        'alternatives': 'false',
-        'steps': 'false',
-      },
-    );
-
-    try {
-      final response = await http.get(uri);
-      if (response.statusCode != 200) {
-        throw Exception(
-            'Route request failed with status ${response.statusCode}');
-      }
-
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final routes = decoded['routes'] as List<dynamic>?;
-      final route = routes != null && routes.isNotEmpty
-          ? routes.first as Map<String, dynamic>
-          : null;
-      final geometry = route?['geometry'] as Map<String, dynamic>?;
-      final coordinates = geometry?['coordinates'] as List<dynamic>?;
-
-      final routePoints = <LatLng>[];
-      if (coordinates != null) {
-        for (final coordinate in coordinates) {
-          if (coordinate is List && coordinate.length >= 2) {
-            final longitude = coordinate[0];
-            final latitude = coordinate[1];
-            if (longitude is num && latitude is num) {
-              routePoints
-                  .add(LatLng(latitude.toDouble(), longitude.toDouble()));
-            }
-          }
-        }
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _routePoints = routePoints.length >= 2
-            ? routePoints
-            : const [_pickupPoint, _dropPoint];
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _routePoints = const [_pickupPoint, _dropPoint];
-      });
-    }
-  }
-
   LatLng _pointAlongRoute(double t) {
     final points = _routePoints;
     if (points.length < 2) {
-      return _interpolatePoint(_pickupPoint, _dropPoint, t);
+      return _interpolatePoint(
+        _fallbackPickupPoint,
+        _fallbackDropPoint,
+        t,
+      );
     }
 
     final clampedT = t.clamp(0.0, 1.0);
@@ -492,15 +447,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                     ),
                     MarkerLayer(
                       markers: [
-                        const Marker(
-                          point: _pickupPoint,
+                        Marker(
+                          point: _routePoints.first,
                           width: 30,
                           height: 30,
                           child: Icon(Icons.trip_origin_rounded,
                               color: Colors.blue, size: 22),
                         ),
-                        const Marker(
-                          point: _dropPoint,
+                        Marker(
+                          point: _routePoints.last,
                           width: 34,
                           height: 34,
                           child: Icon(Icons.place_rounded,
