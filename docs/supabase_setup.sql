@@ -311,7 +311,12 @@ create table if not exists orders (
   eta                  text,
 
   created_at           timestamptz not null default now(),
-  updated_at           timestamptz not null default now()
+  updated_at           timestamptz not null default now(),
+
+  -- Delivery Verification
+  delivery_otp         text,                                    -- OTP for delivery verification
+  otp_verified         boolean not null default false,          -- Whether OTP has been verified
+  otp_generated_at     timestamptz                              -- When OTP was generated
 );
 
 create index if not exists idx_orders_customer     on orders (customer_id);
@@ -1234,19 +1239,70 @@ begin
       v_confirmed, p_amount;
   end if;
 
-  -- Move funds from confirmed → pending
-  update driver_details
-    set wallet_confirmed = v_confirmed - p_amount,
-        wallet_pending   = v_pending   + p_amount,
-        updated_at       = now()
-    where user_id = p_driver_id;
 
-  -- Log the withdrawal transaction
-  insert into wallet_transactions
-    (driver_id, amount, txn_type, status, description)
-  values
-    (p_driver_id, p_amount, 'withdrawal', 'pending',
-     'Withdrawal to registered bank account');
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 27. COMPLETE TRIP RPC (SECURITY DEFINER)
+-- ────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION complete_trip_tx(p_order_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_order RECORD;
+BEGIN
+  SELECT * INTO v_order FROM orders WHERE id = p_order_id;
+  
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Order not found';
+  END IF;
+  
+  IF v_order.driver_id IS NULL THEN
+    RAISE EXCEPTION 'No driver assigned to this order';
+  END IF;
+
+  UPDATE driver_details
+  SET 
+    total_trips = total_trips + 1,
+    wallet_confirmed = wallet_confirmed + v_order.total_amount,
+    wallet_total = wallet_total + v_order.total_amount,
+    updated_at = NOW()
+  WHERE user_id = v_order.driver_id;
+  
+  INSERT INTO wallet_transactions (
+    driver_id, order_display_id, amount, txn_type, status, description
+  ) VALUES (
+    v_order.driver_id,
+    v_order.order_display_id,
+    v_order.total_amount,
+    'credit',
+    'confirmed',
+    'Payout for Order ' || v_order.order_display_id
+  );
+  
+  INSERT INTO earnings_daily (driver_id, day_date, amount, trip_count)
+  VALUES (v_order.driver_id, CURRENT_DATE, v_order.total_amount, 1)
+  ON CONFLICT (driver_id, day_date)
+  DO UPDATE SET 
+    amount = earnings_daily.amount + EXCLUDED.amount,
+    trip_count = earnings_daily.trip_count + 1;
+END;
+$$;
+
+-- Move funds from confirmed → pending
+update driver_details
+  set wallet_confirmed = v_confirmed - p_amount,
+      wallet_pending   = v_pending   + p_amount,
+      updated_at       = now()
+  where user_id = p_driver_id;
+
+-- Log the withdrawal transaction
+insert into wallet_transactions
+  (driver_id, amount, txn_type, status, description)
+values
+  (p_driver_id, p_amount, 'withdrawal', 'pending',
+   'Withdrawal to registered bank account');
 end;
 $$;
 
@@ -1296,6 +1352,55 @@ begin
     amount       = earnings_daily.amount + excluded.amount,
     trip_count   = earnings_daily.trip_count + 1,
     hours_driven = earnings_daily.hours_driven + excluded.hours_driven;
+end;
+$$;
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- RPC 4: complete_trip_tx (overload) — Complete an order and release payment using order ID
+-- ────────────────────────────────────────────────────────────────────────────
+create or replace function complete_trip_tx(p_order_id uuid)
+returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_order record;
+begin
+  select * into v_order from orders where id = p_order_id;
+
+  if not found then
+    raise exception 'Order not found';
+  end if;
+
+  if v_order.driver_id is null then
+    raise exception 'No driver assigned to this order';
+  end if;
+
+  update driver_details
+  set
+    total_trips = total_trips + 1,
+    wallet_confirmed = wallet_confirmed + v_order.total_amount,
+    wallet_total = wallet_total + v_order.total_amount,
+    updated_at = now()
+  where user_id = v_order.driver_id;
+
+  insert into wallet_transactions (
+    driver_id, order_display_id, amount, txn_type, status, description
+  ) values (
+    v_order.driver_id,
+    v_order.order_display_id,
+    v_order.total_amount,
+    'credit',
+    'confirmed',
+    'Payout for Order ' || v_order.order_display_id
+  );
+
+  insert into earnings_daily (driver_id, day_date, amount, trip_count)
+  values (v_order.driver_id, current_date, v_order.total_amount, 1)
+  on conflict (driver_id, day_date)
+  do update set
+    amount = earnings_daily.amount + excluded.amount,
+    trip_count = earnings_daily.trip_count + 1;
 end;
 $$;
 

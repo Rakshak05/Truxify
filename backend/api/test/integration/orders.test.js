@@ -713,3 +713,168 @@ describe('PUT /api/orders/:id/milestones — timeline update error', () => {
     expect(res.status).toBe(500);
   });
 });
+
+describe('Delivery OTP Verification and Milestones', () => {
+  beforeEach(() => {
+    m.store.orders = [];
+    m.store.order_timeline = [];
+    m.store.load_offers = [];
+    m.store.load_bids = [];
+    m.store.profiles = [];
+    m.store.driver_details = [];
+    m.store.trucks = [];
+    m.calls.length = 0;
+  });
+
+  it('blocks direct transition to Delivered milestone with descriptive message', async () => {
+    m.store.orders = [{
+      id: 'order-1',
+      driver_id: 'driver-123',
+      order_display_id: 'ORD001',
+      status: 'in_transit'
+    }];
+
+    const app = buildApp();
+    const res = await request(app)
+      .put('/api/orders/order-1/milestones')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({ milestone: 'Delivered' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.');
+  });
+
+  it('generates and returns OTP when moving to In Transit milestone', async () => {
+    m.store.orders = [{
+      id: 'order-1',
+      driver_id: 'driver-123',
+      order_display_id: 'ORD001',
+      status: 'picked_up',
+      otp_verified: false
+    }];
+    m.store.order_timeline = [{
+      order_display_id: 'ORD001',
+      milestone: 'In Transit',
+      completed: false
+    }];
+
+    const app = buildApp();
+    const res = await request(app)
+      .put('/api/orders/order-1/milestones')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({ milestone: 'In Transit' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('otp');
+    expect(res.body.otp).toMatch(/^\d{6}$/); // 6-digit OTP
+
+    const order = m.store.orders.find(o => o.id === 'order-1');
+    expect(order.delivery_otp).toBe(res.body.otp);
+    expect(order.otp_verified).toBe(false);
+    expect(order.otp_generated_at).toBeDefined();
+  });
+
+  it('fails OTP verification if missing OTP', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/order-1/verify-delivery')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({}); // Missing OTP
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('OTP is required for verification.');
+  });
+
+  it('fails OTP verification if driver is not assigned', async () => {
+    m.store.orders = [{
+      id: 'order-1',
+      driver_id: 'driver-different',
+      order_display_id: 'ORD001',
+      delivery_otp: '123456',
+      otp_verified: false
+    }];
+
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/order-1/verify-delivery')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({ otp: '123456' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Access Denied: You are not assigned to this order.');
+  });
+
+  it('fails OTP verification if OTP is invalid', async () => {
+    m.store.orders = [{
+      id: 'order-1',
+      driver_id: 'driver-123',
+      order_display_id: 'ORD001',
+      delivery_otp: '123456',
+      otp_verified: false
+    }];
+
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/order-1/verify-delivery')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({ otp: '654321' }); // Invalid OTP
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid OTP. Please check and try again.');
+  });
+
+  it('verifies delivery successfully with correct OTP, updates status and calls RPC', async () => {
+    m.store.orders = [{
+      id: 'order-1',
+      driver_id: 'driver-123',
+      order_display_id: 'ORD001',
+      delivery_otp: '123456',
+      otp_verified: false,
+      status: 'in_transit'
+    }];
+    m.store.order_timeline = [{
+      order_display_id: 'ORD001',
+      milestone: 'Delivered',
+      completed: false
+    }];
+
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/order-1/verify-delivery')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({ otp: 123456 }); // Numeric input, verifies type safety
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/Delivery verified successfully/i);
+
+    const order = m.store.orders.find(o => o.id === 'order-1');
+    expect(order.otp_verified).toBe(true);
+    expect(order.status).toBe('payment_released');
+
+    const timeline = m.store.order_timeline.find(t => t.order_display_id === 'ORD001' && t.milestone === 'Delivered');
+    expect(timeline.completed).toBe(true);
+
+    const rpcCall = m.calls.find(c => c.rpc === 'complete_trip_tx');
+    expect(rpcCall).toBeTruthy();
+    expect(rpcCall.args).toEqual({ p_order_id: 'order-1' });
+  });
+});
+

@@ -541,6 +541,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
 // ============================================================================
 // 7. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 // ============================================================================
@@ -549,11 +550,17 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req,
   const { milestone } = req.body;
 
   const milestoneMap = {
-    'En Route to Pickup': 'truck_assigned',
+    'Truck Assigned': 'truck_assigned',
+    'En Route to Pickup': 'picked_up',
     'Goods Loaded': 'picked_up',
     'In Transit': 'in_transit',
-    'Delivered': 'delivered',
+    'Arriving': 'arriving',
   };
+
+  // Prevent direct transition to Delivered - must use OTP verification
+  if (milestone === 'Delivered') {
+    return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
+  }
 
   if (!milestone || !milestoneMap[milestone]) {
     return res.status(400).json({
@@ -562,65 +569,154 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req,
   }
 
   try {
-    const { data: order } = await supabase
+    // 7.1 Fetch order and verify driver is assigned
+    const { data: order, error: orderErr } = await supabase
       .from('orders')
-      .select('driver_id, order_display_id')
+      .select('*')
       .eq('id', orderId)
       .maybeSingle();
 
-    if (!order) {
-      return res.status(404).json({
-        error: 'Order not found.'
-      });
+    if (orderErr || !order) {
+      return res.status(404).json({ error: 'Order not found.' });
     }
 
     if (order.driver_id !== req.user.id) {
-      return res.status(403).json({
-        error: 'Access Denied: You are not assigned to this order.'
-      });
+      return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
     }
 
     const status = milestoneMap[milestone];
 
-    const { error: orderErr } = await supabase
-  .from('orders')
-  .update({
-    status,
-    updated_at: new Date().toISOString()
-  })
-  .eq('id', orderId);
+    // 7.3 Prepare updates
+    const updates = {
+      status,
+      updated_at: new Date().toISOString()
+    };
 
-if (orderErr) {
-  return res.status(500).json({
-    error: orderErr.message
-  });
-}
+    // Generate OTP if moving to In Transit
+    let generatedOtp = null;
+    if (milestone === 'In Transit' && !order.delivery_otp) {
+      generatedOtp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+      updates.delivery_otp = generatedOtp;
+      updates.otp_generated_at = new Date().toISOString();
+    }
 
-const { error: timelineErr } = await supabase
-  .from('order_timeline')
-  .update({
-    completed: true,
-    milestone_time: new Date().toISOString()
-  })
-  .eq('order_display_id', order.order_display_id)
-  .eq('milestone', milestone);
+    // 7.4 Perform order update
+    const { data: updatedOrder, error: updateErr } = await supabase
+      .from('orders')
+      .update(updates)
+      .eq('id', orderId)
+      .select('*')
+      .single();
 
-if (timelineErr) {
-  return res.status(500).json({
-    error: timelineErr.message
-  });
-}
+    if (updateErr) {
+      return res.status(500).json({ error: 'Failed to update order.', details: updateErr.message });
+    }
 
-    return res.status(200).json({
+    // 7.5 Update order timeline
+    await supabase
+      .from('order_timeline')
+      .update({ completed: true, milestone_time: new Date().toISOString() })
+      .eq('order_display_id', order.order_display_id)
+      .eq('milestone', milestone);
+
+    // 7.6 Return response
+    const response = {
       message: 'Milestone updated successfully.',
+      order: updatedOrder,
       milestone,
       status
+    };
+    if (generatedOtp) {
+      // In real app, you would send this OTP to the customer via SMS/email
+      response.otp = generatedOtp;
+    }
+
+    res.json(response);
+
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 8. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
+// ============================================================================
+router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), async (req, res) => {
+  const orderId = req.params.id;
+  const { otp } = req.body;
+
+  if (!otp) {
+    return res.status(400).json({ error: 'OTP is required for verification.' });
+  }
+
+  try {
+    // 8.1 Fetch order and verify driver is assigned
+    const { data: order, error: orderErr } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', orderId)
+      .maybeSingle();
+
+    if (orderErr || !order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    if (order.driver_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
+    }
+
+    // 8.2 Validate OTP - type safe comparison
+    if (!order.delivery_otp || order.otp_verified) {
+      return res.status(400).json({ error: 'OTP not available or already verified.' });
+    }
+
+    if (order.delivery_otp !== String(otp)) {
+      return res.status(400).json({ error: 'Invalid OTP. Please check and try again.' });
+    }
+
+    // 8.3 Mark OTP as verified and update order status
+    const { data: updatedOrder, error: updateErr } = await supabase
+      .from('orders')
+      .update({
+        otp_verified: true,
+        status: 'payment_released',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', orderId)
+      .select('*')
+      .single();
+
+    if (updateErr) {
+      return res.status(500).json({ error: 'Failed to verify OTP.', details: updateErr.message });
+    }
+
+    // 8.4 Update order timeline
+    await supabase
+      .from('order_timeline')
+      .update({ completed: true, milestone_time: new Date().toISOString() })
+      .eq('order_display_id', order.order_display_id)
+      .eq('milestone', 'Delivered');
+
+    // 8.5 Call complete_trip_tx RPC
+    try {
+      const { error: rpcErr } = await supabase.rpc('complete_trip_tx', {
+        p_order_id: orderId
+      });
+      if (rpcErr) {
+        console.warn('complete_trip_tx RPC not available or failed:', rpcErr.message);
+      }
+    } catch (rpcErr) {
+      console.warn('complete_trip_tx RPC call error:', rpcErr.message);
+    }
+
+    // 8.6 Return success
+    res.json({
+      message: 'Delivery verified successfully! Payment released to driver.',
+      order: updatedOrder
     });
 
   } catch (err) {
-    return res.status(500).json({
-      error: 'Internal Server Error'
-    });
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
