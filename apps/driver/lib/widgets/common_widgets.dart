@@ -538,11 +538,6 @@ class _OtpInputRowState extends State<OtpInputRow> {
     }
   }
 
-  String _realValue(int index) {
-    final text = widget.controllers[index].text;
-    return text.replaceAll(_zwsp, '');
-  }
-
   void _onChanged(String value, int index) {
     final controllers = widget.controllers;
     final focusNodes = widget.focusNodes;
