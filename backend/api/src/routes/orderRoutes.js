@@ -156,6 +156,7 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
       { order_display_id: orderDisplayId, milestone: 'Order Placed', milestone_time: new Date().toISOString(), completed: true, sort_order: 10 },
       { order_display_id: orderDisplayId, milestone: 'Truck Assigned', milestone_time: null, completed: false, sort_order: 20 },
       { order_display_id: orderDisplayId, milestone: 'En Route to Pickup', milestone_time: null, completed: false, sort_order: 30 },
+      { order_display_id: orderDisplayId, milestone: 'Arrived at Pickup', milestone_time: null, completed: false, sort_order: 35 },
       { order_display_id: orderDisplayId, milestone: 'Goods Loaded', milestone_time: null, completed: false, sort_order: 40 },
       { order_display_id: orderDisplayId, milestone: 'In Transit', milestone_time: null, completed: false, sort_order: 50 },
       { order_display_id: orderDisplayId, milestone: 'Delivered', milestone_time: null, completed: false, sort_order: 60 }
@@ -493,7 +494,8 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), validatePar
 
   const milestoneMap = {
     'Truck Assigned': 'truck_assigned',
-    'En Route to Pickup': 'truck_assigned',
+    'En Route to Pickup': 'en_route_pickup',
+    'Arrived at Pickup': 'arrived_pickup',
     'Goods Loaded': 'picked_up',
     'In Transit': 'in_transit',
     'Arriving': 'arriving',
