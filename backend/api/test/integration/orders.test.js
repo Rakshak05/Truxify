@@ -349,8 +349,38 @@ describe('POST /api/orders — server-side pricing contract', () => {
       });
 
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('truck_assigned');
+    expect(res.body.status).toBe('en_route_pickup');
     expect(res.body.status).not.toBe('picked_up');
+  });
+
+  it('Arrived at Pickup milestone sets status to arrived_pickup', async () => {
+    m.store.orders = [{
+      id: 'order-1',
+      driver_id: 'driver-123',
+      order_display_id: 'ORD001',
+      status: 'en_route_pickup'
+    }];
+
+    m.store.order_timeline = [{
+      order_display_id: 'ORD001',
+      milestone: 'Arrived at Pickup',
+      completed: false
+    }];
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .put('/api/orders/order-1/milestones')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({
+        milestone: 'Arrived at Pickup'
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('arrived_pickup');
   });
 
   it('Goods Loaded milestone sets status to picked_up', async () => {
