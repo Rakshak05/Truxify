@@ -233,7 +233,8 @@ class OrderService {
           .select('full_name')
           .eq('id', driverId)
           .maybeSingle();
-      return response?['full_name']?.toString();
+      final fullName = response?['full_name']?.toString().trim();
+      return (fullName != null && fullName.isNotEmpty) ? fullName : null;
     } catch (e, st) {
       debugPrint('Error fetching driver name: $e\n$st');
       return null;
@@ -247,7 +248,8 @@ class OrderService {
           .select('number_plate')
           .eq('id', truckId)
           .maybeSingle();
-      return response?['number_plate']?.toString();
+      final numberPlate = response?['number_plate']?.toString().trim();
+      return (numberPlate != null && numberPlate.isNotEmpty) ? numberPlate : null;
     } catch (e, st) {
       debugPrint('Error fetching truck number: $e\n$st');
       return null;

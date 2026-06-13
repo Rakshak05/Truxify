@@ -66,7 +66,21 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
       if (!mounted) return;
 
+      bool isStale = false;
       setState(() {
+        if (_order != null && order != null) {
+          final existingUpdated =
+              DateTime.tryParse(_order?['updated_at']?.toString() ?? '');
+          final newUpdated =
+              DateTime.tryParse(order['updated_at']?.toString() ?? '');
+          if (existingUpdated != null &&
+              newUpdated != null &&
+              newUpdated.isBefore(existingUpdated)) {
+            isStale = true;
+            return;
+          }
+        }
+
         _order = order;
 
         if (order != null) {
@@ -108,6 +122,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
           ];
         }
       });
+
+      if (isStale) return;
 
       if (order != null) {
         await _fetchDriverAndTruck(order['driver_id'], order['truck_id']);
