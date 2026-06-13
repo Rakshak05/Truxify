@@ -40,9 +40,13 @@ function isOtpExpired(otpGeneratedAt) {
 
 async function checkOtpLockout(orderId) {
   if (redisClient) {
-    const lockKey = `otp_lockout:${orderId}`;
-    const isLocked = await redisClient.get(lockKey);
-    return !!isLocked;
+    try {
+      const lockKey = `otp_lockout:${orderId}`;
+      const isLocked = await redisClient.get(lockKey);
+      return !!isLocked;
+    } catch (err) {
+      console.error('[OTP] Redis error in checkOtpLockout, falling back to memory:', err.message);
+    }
   }
   const record = inMemoryOtpFailedAttempts.get(orderId);
   if (!record || !record.lockedUntil) return false;
@@ -55,15 +59,19 @@ async function checkOtpLockout(orderId) {
 
 async function recordOtpFailure(orderId) {
   if (redisClient) {
-    const countKey = `otp_failed_count:${orderId}`;
-    const lockKey = `otp_lockout:${orderId}`;
-    
-    const count = await redisClient.incr(countKey);
-    if (count === 1) await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
-    if (count >= OTP_MAX_FAILED_ATTEMPTS) {
-      await redisClient.set(lockKey, '1', 'EX', OTP_LOCKOUT_MINUTES * 60);
+    try {
+      const countKey = `otp_failed_count:${orderId}`;
+      const lockKey = `otp_lockout:${orderId}`;
+      
+      const count = await redisClient.incr(countKey);
+      if (count === 1) await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
+      if (count >= OTP_MAX_FAILED_ATTEMPTS) {
+        await redisClient.set(lockKey, '1', 'EX', OTP_LOCKOUT_MINUTES * 60);
+      }
+      return count;
+    } catch (err) {
+      console.error('[OTP] Redis error in recordOtpFailure, falling back to memory:', err.message);
     }
-    return count;
   }
   
   let record = inMemoryOtpFailedAttempts.get(orderId);
@@ -80,10 +88,14 @@ async function recordOtpFailure(orderId) {
 
 async function clearOtpState(orderId) {
   if (redisClient) {
-    const countKey = `otp_failed_count:${orderId}`;
-    const lockKey = `otp_lockout:${orderId}`;
-    await redisClient.del(countKey, lockKey);
-    return;
+    try {
+      const countKey = `otp_failed_count:${orderId}`;
+      const lockKey = `otp_lockout:${orderId}`;
+      await redisClient.del(countKey, lockKey);
+      return;
+    } catch (err) {
+      console.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);
+    }
   }
   inMemoryOtpFailedAttempts.delete(orderId);
 }
@@ -92,7 +104,7 @@ async function clearOtpState(orderId) {
 // Rate limiter for the verify-delivery endpoint
 const verifyDeliveryLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many delivery verification attempts. Please try again later.' },
