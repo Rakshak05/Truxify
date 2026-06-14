@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -61,7 +62,7 @@ class _OtpScreenState extends State<OtpScreen> {
           'phone': widget.phone,
           'otp': code,
         }),
-      );
+      ).timeout(const Duration(seconds: 15));
 
       if (!mounted) return;
 
@@ -76,7 +77,16 @@ class _OtpScreenState extends State<OtpScreen> {
         return;
       }
 
-      Navigator.of(context).pushNamed(AppRoutes.shell);
+      Navigator.of(context).pushReplacementNamed(AppRoutes.shell);
+    } on TimeoutException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Verification timed out. Please check your connection and try again.',
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

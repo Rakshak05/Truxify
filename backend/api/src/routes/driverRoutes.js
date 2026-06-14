@@ -15,7 +15,7 @@ const loginOtpSchema = z.object({
 
 const verifyLoginOtpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 5,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many OTP verification attempts. Please try again later.' },
