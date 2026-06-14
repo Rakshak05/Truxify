@@ -10,33 +10,24 @@ const router = express.Router();
 // ============================================================================
 
 // Per-event-type payload validation (no OTP in otpDelivery, validated coords in gpsUpdate)
-const gpsPayloadSchema = z.object({
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-  timestampMs: z.number().int().positive().optional(),
-});
-
+// Unknown event types pass through with generic payload — only known sensitive types are restricted
 const otpDeliveryPayloadSchema = z.object({
   stopId: z.string().min(1),
-});
+}).strict();
 
-const stopArrivalPayloadSchema = z.object({
-  stopId: z.string().min(1),
-});
-
-const tripPayloadSchema = z.object({
-  tripId: z.string().min(1),
-});
-
-const podPayloadSchema = z.record(z.any());
-
-const eventPayloadSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('gpsUpdate'), payload: gpsPayloadSchema }),
+const eventPayloadSchema = z.union([
   z.object({ type: z.literal('otpDelivery'), payload: otpDeliveryPayloadSchema }),
-  z.object({ type: z.literal('stopArrival'), payload: stopArrivalPayloadSchema }),
-  z.object({ type: z.literal('tripStart'), payload: tripPayloadSchema }),
-  z.object({ type: z.literal('tripEnd'), payload: tripPayloadSchema }),
-  z.object({ type: z.literal('podMetadata'), payload: podPayloadSchema }),
+  z.object({ type: z.literal('gpsUpdate'), payload: z.object({
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+    timestampMs: z.number().int().positive().optional(),
+  }) }),
+  z.object({ type: z.literal('stopArrival'), payload: z.object({ stopId: z.string().min(1) }) }),
+  z.object({ type: z.literal('tripStart'), payload: z.object({ tripId: z.string().min(1) }) }),
+  z.object({ type: z.literal('tripEnd'), payload: z.object({ tripId: z.string().min(1) }) }),
+  z.object({ type: z.literal('podMetadata'), payload: z.record(z.any()) }),
+  // Catch-all for any other event types — validate payload is a JSON object, no further restrictions
+  z.object({ type: z.string(), payload: z.record(z.any()) }),
 ]);
 
 // Schema for an individual Trip Event from the Flutter offline database
